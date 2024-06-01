@@ -1,0 +1,64 @@
+name: Update Checker
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 16,4 * * *
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  check-update:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@main
+      with:
+        fetch-depth: 1
+
+    - name: Set Environment
+      run: |
+        sudo timedatectl set-timezone "$TZ"
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
+
+    - name: Download Packages
+      run: |
+        bash packages.sh
+        cp LICENSE LICENSE.packages README.md packages/
+        git clone https://github.com/wukibaka/openwrt-packages.git
+
+    - name: Compare
+      id: compare
+      run: |
+        diff -r --exclude=".git" ./openwrt-packages ./packages > diff.txt || true
+        if [ -s diff.txt ]; then
+          echo "needs-update=true" >> $GITHUB_OUTPUT
+        else
+          echo "needs-update=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Update Packages
+      if: steps.compare.outputs.needs-update == 'true'
+      run: |
+        cd openwrt-packages
+        rm -Rf *
+        git rm --cache *
+        cd ..
+        cp -a ./packages/* ./openwrt-packages
+
+    - name: Push Update
+      if: steps.compare.outputs.needs-update == 'true'
+      run: |
+        cd openwrt-packages
+        git add .
+        git commit -m "update$(TZ='Asia/Shanghai' date +@%Y%m%d)"
+        git push -f "https://${{ secrets.ACCESS_TOKEN }}@github.com/wukibaka/openwrt-packages.git"
+
+    - name: Delete workflow runs
+      uses: Mattraks/delete-workflow-runs@main
+      with:
+        retain_days: 0
+        keep_minimum_runs: 2
